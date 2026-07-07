@@ -97,7 +97,10 @@ class ReplyFormattingTest(unittest.TestCase):
         reply = format_reply(parse_message("50 1000"))
 
         self.assertIn("成交金額：50,000 元", reply)
+        self.assertIn("買進成本", reply)
         self.assertIn("買進手續費（1.8折）：20 元", reply)
+        self.assertIn("---", reply)
+        self.assertIn("賣出成本", reply)
         self.assertIn("賣出手續費（1.8折）：20 元", reply)
         self.assertIn("證交稅：150 元", reply)
         self.assertIn("買賣合計成本：190 元", reply)
@@ -107,7 +110,10 @@ class ReplyFormattingTest(unittest.TestCase):
 
         self.assertIn("股價：50 元", reply)
         self.assertIn("至少 1,593 股", reply)
+        self.assertIn("買進成本", reply)
         self.assertIn("買進手續費（1.8折）：21 元", reply)
+        self.assertIn("---", reply)
+        self.assertIn("賣出成本", reply)
         self.assertIn("賣出手續費（1.8折）：21 元", reply)
 
     def test_help_includes_examples(self):
