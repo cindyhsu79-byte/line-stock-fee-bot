@@ -160,6 +160,10 @@ def parse_message(text: str) -> ParsedInput:
     return ParsedInput(stock_code=stock_code, price=price, shares=shares, discount=float(DEFAULT_DISCOUNT))
 
 
+def should_ignore_text(text: str) -> bool:
+    return not re.search(r"\d", text)
+
+
 def format_reply(parsed: ParsedInput, quote_lookup=fetch_stock_quote) -> str:
     if parsed.price is None:
         return _format_quote_reply(parsed.stock_code, quote_lookup)
