@@ -165,7 +165,10 @@ def format_reply(parsed: ParsedInput) -> str:
     return "\n".join(
         [
             f"成交金額：{round_trip.trade_amount:,} 元",
+            "買進成本",
             f"買進手續費（{discount_label}）：{round_trip.buy_fee:,} 元",
+            "---",
+            "賣出成本",
             f"賣出手續費（{discount_label}）：{round_trip.sell_fee:,} 元",
             f"證交稅：{round_trip.sell_tax:,} 元",
             f"買賣合計成本：{round_trip.total_cost:,} 元",
@@ -192,7 +195,10 @@ def _format_suggestion_reply(suggestion: ShareSuggestion) -> str:
             f"若要讓{discount_label}手續費超過 20 元低消：",
             f"至少 {suggestion.shares:,} 股",
             f"成交金額：約 {suggestion.trade_amount:,} 元",
+            "買進成本",
             f"買進手續費（{discount_label}）：{suggestion.buy_fee:,} 元",
+            "---",
+            "賣出成本",
             f"賣出手續費（{discount_label}）：{suggestion.sell_fee:,} 元",
             f"賣出證交稅：約 {suggestion.sell_tax:,} 元",
             f"買賣合計成本：約 {suggestion.total_cost:,} 元",
