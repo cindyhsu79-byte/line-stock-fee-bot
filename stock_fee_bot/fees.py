@@ -164,9 +164,24 @@ def should_ignore_text(text: str) -> bool:
     return not re.search(r"\d", text)
 
 
+def _format_compact_quote_reply(stock_code: str, quote_lookup) -> str:
+    try:
+        quote = quote_lookup(stock_code)
+    except StockQuoteError:
+        return _format_quote_reply(stock_code, quote_lookup)
+
+    return "\n".join(
+        [
+            f"代號：{quote.stock_code}",
+            f"名稱：{quote.name}",
+            f"目前股價：{_format_decimal(quote.price)} 元",
+        ]
+    )
+
+
 def format_reply(parsed: ParsedInput, quote_lookup=fetch_stock_quote) -> str:
     if parsed.price is None:
-        return _format_quote_reply(parsed.stock_code, quote_lookup)
+        return _format_compact_quote_reply(parsed.stock_code, quote_lookup)
 
     if parsed.shares is None:
         return _format_price_or_shares_reply(parsed, quote_lookup)
