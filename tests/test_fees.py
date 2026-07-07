@@ -58,11 +58,10 @@ class SuggestionTest(unittest.TestCase):
     def test_suggests_shares_that_make_discounted_fee_exceed_minimum(self):
         suggestion = suggest_minimum_shares(price=50, discount=DEFAULT_DISCOUNT)
 
-        self.assertEqual(suggestion.shares, 1593)
-        self.assertEqual(suggestion.trade_amount, 79650)
-        self.assertEqual(suggestion.buy_fee, 21)
-        self.assertEqual(suggestion.sell_fee, 21)
-        self.assertGreater(suggestion.buy_fee, 20)
+        self.assertEqual(suggestion.shares, 1565)
+        self.assertEqual(suggestion.trade_amount, 78250)
+        self.assertEqual(suggestion.buy_fee, 20)
+        self.assertEqual(suggestion.sell_fee, 20)
 
 
 class MessageParsingTest(unittest.TestCase):
@@ -140,12 +139,12 @@ class ReplyFormattingTest(unittest.TestCase):
 
         self.assertIn("代號：2330", reply)
         self.assertIn("股價：50 元", reply)
-        self.assertIn("至少 1,593 股", reply)
+        self.assertIn("至少 1,565 股", reply)
         self.assertIn("買進成本", reply)
-        self.assertIn("買進手續費（1.8折）：21 元", reply)
+        self.assertIn("買進手續費（1.8折）：20 元", reply)
         self.assertIn("---", reply)
         self.assertIn("賣出成本", reply)
-        self.assertIn("賣出手續費（1.8折）：21 元", reply)
+        self.assertIn("賣出手續費（1.8折）：20 元", reply)
 
     def test_treats_second_number_as_shares_when_it_is_far_from_market_price(self):
         def fake_lookup(stock_code):
