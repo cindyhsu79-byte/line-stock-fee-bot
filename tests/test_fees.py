@@ -11,7 +11,11 @@ from stock_fee_bot.fees import (
     parse_message,
     suggest_minimum_shares,
 )
-from stock_fee_bot.quote import StockQuote
+from stock_fee_bot.quote import StockQuote, StockQuoteError
+
+
+def quote_not_available(stock_code):
+    raise StockQuoteError(stock_code)
 
 
 class FeeCalculationTest(unittest.TestCase):
@@ -126,7 +130,7 @@ class ReplyFormattingTest(unittest.TestCase):
         self.assertIn("買賣合計成本：190 元", reply)
 
     def test_formats_code_price_suggestion_reply(self):
-        reply = format_reply(parse_message("2330 50"))
+        reply = format_reply(parse_message("2330 50"), quote_lookup=quote_not_available)
 
         self.assertIn("代號：2330", reply)
         self.assertIn("股價：50 元", reply)
@@ -136,6 +140,27 @@ class ReplyFormattingTest(unittest.TestCase):
         self.assertIn("---", reply)
         self.assertIn("賣出成本", reply)
         self.assertIn("賣出手續費（1.8折）：21 元", reply)
+
+    def test_treats_second_number_as_shares_when_it_is_far_from_market_price(self):
+        def fake_lookup(stock_code):
+            self.assertEqual(stock_code, "2330")
+            return StockQuote(stock_code="2330", name="TSMC", price=Decimal("950"), source="TWSE")
+
+        reply = format_reply(parse_message("2330 100"), quote_lookup=fake_lookup)
+
+        self.assertIn("950", reply)
+        self.assertIn("100", reply)
+        self.assertIn("95,000", reply)
+
+    def test_keeps_second_number_as_price_when_it_is_close_to_market_price(self):
+        def fake_lookup(stock_code):
+            self.assertEqual(stock_code, "2330")
+            return StockQuote(stock_code="2330", name="TSMC", price=Decimal("950"), source="TWSE")
+
+        reply = format_reply(parse_message("2330 960"), quote_lookup=fake_lookup)
+
+        self.assertIn("960", reply)
+        self.assertNotIn("912,000", reply)
 
     def test_help_includes_new_examples(self):
         help_text = format_help()
