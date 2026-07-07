@@ -112,17 +112,15 @@ def suggest_minimum_shares(
     if discount_decimal <= 0:
         raise ValueError("discount must be greater than zero")
 
-    # To display a discounted fee above the 20 NTD minimum, the rounded
-    # discounted fee must be at least 21 NTD.
-    required_standard_fee = ((Decimal(MINIMUM_FEE) + Decimal("0.5")) / discount_decimal).to_integral_value(
+    required_standard_fee = (Decimal(MINIMUM_FEE) / discount_decimal).to_integral_value(
         rounding=ROUND_CEILING
     )
     required_trade_amount = (required_standard_fee - Decimal("0.5")) / FEE_RATE
     shares = int((required_trade_amount / price_decimal).to_integral_value(rounding=ROUND_CEILING))
 
-    while calculate_fee(price_decimal, shares, discount_decimal).discounted_fee <= MINIMUM_FEE:
+    while _raw_discounted_fee(price_decimal, shares, discount_decimal) <= Decimal(MINIMUM_FEE):
         shares += 1
-    while shares > 1 and calculate_fee(price_decimal, shares - 1, discount_decimal).discounted_fee > MINIMUM_FEE:
+    while shares > 1 and _raw_discounted_fee(price_decimal, shares - 1, discount_decimal) > Decimal(MINIMUM_FEE):
         shares -= 1
 
     round_trip = calculate_round_trip(price_decimal, shares, discount_decimal)
@@ -289,6 +287,12 @@ def _format_suggestion_reply(parsed: ParsedInput, suggestion: ShareSuggestion) -
 
 def _apply_minimum_fee(amount: Decimal) -> int:
     return max(MINIMUM_FEE, int(_round_ntd(amount)))
+
+
+def _raw_discounted_fee(price: Decimal, shares: int, discount: Decimal) -> Decimal:
+    trade_amount_decimal = price * Decimal(shares)
+    standard_fee = _apply_minimum_fee(trade_amount_decimal * FEE_RATE)
+    return Decimal(standard_fee) * discount
 
 
 def _round_ntd(amount: Decimal) -> Decimal:
