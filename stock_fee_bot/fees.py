@@ -15,6 +15,7 @@ class InvalidMessageError(ValueError):
 
 @dataclass(frozen=True)
 class ParsedInput:
+    stock_code: str
     price: Decimal
     shares: int | None = None
     discount: float = float(DEFAULT_DISCOUNT)
@@ -138,32 +139,32 @@ def parse_message(text: str) -> ParsedInput:
     normalized = text.replace(",", " ").strip()
     numbers = re.findall(r"\d+(?:\.\d+)?", normalized)
 
-    if len(numbers) < 1:
-        raise InvalidMessageError("請輸入股價，或輸入股價與股數")
+    if len(numbers) < 2:
+        raise InvalidMessageError("請輸入：代號 股價 股數（股數可省略）")
 
-    price = Decimal(numbers[0])
-    shares = int(Decimal(numbers[1])) if len(numbers) >= 2 else None
+    stock_code = numbers[0].split(".")[0]
+    price = Decimal(numbers[1])
+    shares = int(Decimal(numbers[2])) if len(numbers) >= 3 else None
     discount = DEFAULT_DISCOUNT
 
-    if len(numbers) >= 3:
-        raw_discount = Decimal(numbers[2])
-        discount = _normalize_discount(raw_discount, has_chinese_discount_marker="折" in normalized)
+    if price <= 0 or (shares is not None and shares <= 0):
+        raise InvalidMessageError("股價與股數都必須大於 0")
 
-    if price <= 0 or (shares is not None and shares <= 0) or discount <= 0:
-        raise InvalidMessageError("股價、股數、折扣都必須大於 0")
-
-    return ParsedInput(price=price, shares=shares, discount=float(discount))
+    return ParsedInput(stock_code=stock_code, price=price, shares=shares, discount=float(discount))
 
 
 def format_reply(parsed: ParsedInput) -> str:
     if parsed.shares is None:
-        return _format_suggestion_reply(suggest_minimum_shares(parsed.price, parsed.discount))
+        return _format_suggestion_reply(parsed, suggest_minimum_shares(parsed.price, parsed.discount))
 
     round_trip = calculate_round_trip(parsed.price, parsed.shares, parsed.discount)
     discount_label = _format_discount_label(round_trip.discount)
 
     return "\n".join(
         [
+            f"代號：{parsed.stock_code}",
+            f"股價：{_format_decimal(parsed.price)} 元",
+            f"股數：{parsed.shares:,} 股",
             f"成交金額：{round_trip.trade_amount:,} 元",
             "買進成本",
             f"買進手續費（{discount_label}）：{round_trip.buy_fee:,} 元",
@@ -179,18 +180,19 @@ def format_reply(parsed: ParsedInput) -> str:
 def format_help() -> str:
     return "\n".join(
         [
-            "請輸入股價，或輸入股價與股數。",
-            "例如：50",
-            "例如：50 1000",
-            "目前手續費折扣預設固定為 1.8折。",
+            "請輸入：代號 股價 股數（股數可省略）",
+            "例如：2330 950",
+            "例如：2330 950 1000",
+            "目前手續費折扣固定為 1.8折。",
         ]
     )
 
 
-def _format_suggestion_reply(suggestion: ShareSuggestion) -> str:
+def _format_suggestion_reply(parsed: ParsedInput, suggestion: ShareSuggestion) -> str:
     discount_label = _format_discount_label(suggestion.discount)
     return "\n".join(
         [
+            f"代號：{parsed.stock_code}",
             f"股價：{_format_decimal(suggestion.price)} 元",
             f"若要讓{discount_label}手續費超過 20 元低消：",
             f"至少 {suggestion.shares:,} 股",
@@ -204,12 +206,6 @@ def _format_suggestion_reply(suggestion: ShareSuggestion) -> str:
             f"買賣合計成本：約 {suggestion.total_cost:,} 元",
         ]
     )
-
-
-def _normalize_discount(value: Decimal, has_chinese_discount_marker: bool) -> Decimal:
-    if has_chinese_discount_marker or value > 1:
-        return value / Decimal("10")
-    return value
 
 
 def _apply_minimum_fee(amount: Decimal) -> int:
