@@ -7,7 +7,7 @@ import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from stock_fee_bot.fees import InvalidMessageError, format_help, format_reply, parse_message
+from stock_fee_bot.fees import InvalidMessageError, format_help, format_reply, parse_message, should_ignore_text
 
 
 LINE_REPLY_URL = "https://api.line.me/v2/bot/message/reply"
@@ -65,6 +65,10 @@ class LineBotHandler(BaseHTTPRequestHandler):
             print("Skipped text event: missing reply token", flush=True)
             return
 
+        if should_ignore_text(text):
+            print(f"Skipped chat text: {text!r}", flush=True)
+            return
+
         try:
             reply_text = format_reply(parse_message(text))
         except (InvalidMessageError, ValueError):
@@ -95,7 +99,7 @@ class LineBotHandler(BaseHTTPRequestHandler):
 def reply_to_line(reply_token, text):
     access_token = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN")
     if not access_token:
-        print(text, flush=True)
+        print(text)
         return
 
     body = json.dumps(
@@ -125,5 +129,5 @@ def reply_to_line(reply_token, text):
 def run(host="0.0.0.0", port=None):
     resolved_port = int(port or os.environ.get("PORT", "8000"))
     server = ThreadingHTTPServer((host, resolved_port), LineBotHandler)
-    print(f"LINE stock fee bot listening on http://{host}:{resolved_port}", flush=True)
+    print(f"LINE stock fee bot listening on http://{host}:{resolved_port}")
     server.serve_forever()
