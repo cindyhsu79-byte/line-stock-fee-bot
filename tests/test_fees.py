@@ -59,33 +59,33 @@ class SuggestionTest(unittest.TestCase):
 
 
 class MessageParsingTest(unittest.TestCase):
-    def test_parses_price_only_as_suggestion_request(self):
-        parsed = parse_message("50")
+    def test_parses_code_price_as_suggestion_request(self):
+        parsed = parse_message("2330 950")
 
-        self.assertEqual(parsed.price, 50)
+        self.assertEqual(parsed.stock_code, "2330")
+        self.assertEqual(parsed.price, 950)
         self.assertIsNone(parsed.shares)
         self.assertEqual(parsed.discount, 0.18)
 
-    def test_parses_plain_numbers_with_default_discount(self):
-        parsed = parse_message("50 1000")
+    def test_parses_code_price_and_shares(self):
+        parsed = parse_message("2330 950 1000")
 
-        self.assertEqual(parsed.price, 50)
+        self.assertEqual(parsed.stock_code, "2330")
+        self.assertEqual(parsed.price, 950)
         self.assertEqual(parsed.shares, 1000)
         self.assertEqual(parsed.discount, 0.18)
-
-    def test_still_accepts_explicit_chinese_discount(self):
-        parsed = parse_message("50 1000 6折")
-
-        self.assertEqual(parsed.price, 50)
-        self.assertEqual(parsed.shares, 1000)
-        self.assertEqual(parsed.discount, 0.6)
 
     def test_parses_labeled_input(self):
-        parsed = parse_message("股價50 股數1000")
+        parsed = parse_message("代號2330 股價950 股數1000")
 
-        self.assertEqual(parsed.price, 50)
+        self.assertEqual(parsed.stock_code, "2330")
+        self.assertEqual(parsed.price, 950)
         self.assertEqual(parsed.shares, 1000)
         self.assertEqual(parsed.discount, 0.18)
+
+    def test_rejects_missing_price(self):
+        with self.assertRaises(InvalidMessageError):
+            parse_message("2330")
 
     def test_rejects_invalid_message(self):
         with self.assertRaises(InvalidMessageError):
@@ -94,8 +94,11 @@ class MessageParsingTest(unittest.TestCase):
 
 class ReplyFormattingTest(unittest.TestCase):
     def test_formats_round_trip_reply_for_line(self):
-        reply = format_reply(parse_message("50 1000"))
+        reply = format_reply(parse_message("2330 50 1000"))
 
+        self.assertIn("代號：2330", reply)
+        self.assertIn("股價：50 元", reply)
+        self.assertIn("股數：1,000 股", reply)
         self.assertIn("成交金額：50,000 元", reply)
         self.assertIn("買進成本", reply)
         self.assertIn("買進手續費（1.8折）：20 元", reply)
@@ -105,9 +108,10 @@ class ReplyFormattingTest(unittest.TestCase):
         self.assertIn("證交稅：150 元", reply)
         self.assertIn("買賣合計成本：190 元", reply)
 
-    def test_formats_price_only_suggestion_reply(self):
-        reply = format_reply(parse_message("50"))
+    def test_formats_code_price_suggestion_reply(self):
+        reply = format_reply(parse_message("2330 50"))
 
+        self.assertIn("代號：2330", reply)
         self.assertIn("股價：50 元", reply)
         self.assertIn("至少 1,593 股", reply)
         self.assertIn("買進成本", reply)
@@ -116,11 +120,12 @@ class ReplyFormattingTest(unittest.TestCase):
         self.assertIn("賣出成本", reply)
         self.assertIn("賣出手續費（1.8折）：21 元", reply)
 
-    def test_help_includes_examples(self):
+    def test_help_includes_new_examples(self):
         help_text = format_help()
 
-        self.assertIn("50", help_text)
-        self.assertIn("50 1000", help_text)
+        self.assertIn("代號 股價 股數", help_text)
+        self.assertIn("2330 950", help_text)
+        self.assertIn("2330 950 1000", help_text)
 
 
 if __name__ == "__main__":
