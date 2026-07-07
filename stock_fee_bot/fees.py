@@ -2,6 +2,8 @@ import re
 from dataclasses import dataclass
 from decimal import Decimal, ROUND_CEILING, ROUND_HALF_UP
 
+from stock_fee_bot.quote import StockQuoteError, fetch_stock_quote
+
 
 FEE_RATE = Decimal("0.001425")
 SELL_TAX_RATE = Decimal("0.003")
@@ -16,7 +18,7 @@ class InvalidMessageError(ValueError):
 @dataclass(frozen=True)
 class ParsedInput:
     stock_code: str
-    price: Decimal
+    price: Decimal | None = None
     shares: int | None = None
     discount: float = float(DEFAULT_DISCOUNT)
 
@@ -139,21 +141,28 @@ def parse_message(text: str) -> ParsedInput:
     normalized = text.replace(",", " ").strip()
     numbers = re.findall(r"\d+(?:\.\d+)?", normalized)
 
+    if len(numbers) == 1 and re.fullmatch(r"\d{4}", numbers[0]):
+        return ParsedInput(stock_code=numbers[0])
+
     if len(numbers) < 2:
-        raise InvalidMessageError("請輸入：代號 股價 股數（股數可省略）")
+        raise InvalidMessageError("請輸入：代號，或代號 股價 股數（股數可省略）")
 
     stock_code = numbers[0].split(".")[0]
     price = Decimal(numbers[1])
     shares = int(Decimal(numbers[2])) if len(numbers) >= 3 else None
-    discount = DEFAULT_DISCOUNT
 
+    if len(stock_code) != 4 or not stock_code.isdigit():
+        raise InvalidMessageError("股票代號請輸入 4 碼")
     if price <= 0 or (shares is not None and shares <= 0):
         raise InvalidMessageError("股價與股數都必須大於 0")
 
-    return ParsedInput(stock_code=stock_code, price=price, shares=shares, discount=float(discount))
+    return ParsedInput(stock_code=stock_code, price=price, shares=shares, discount=float(DEFAULT_DISCOUNT))
 
 
-def format_reply(parsed: ParsedInput) -> str:
+def format_reply(parsed: ParsedInput, quote_lookup=fetch_stock_quote) -> str:
+    if parsed.price is None:
+        return _format_quote_reply(parsed.stock_code, quote_lookup)
+
     if parsed.shares is None:
         return _format_suggestion_reply(parsed, suggest_minimum_shares(parsed.price, parsed.discount))
 
@@ -180,10 +189,36 @@ def format_reply(parsed: ParsedInput) -> str:
 def format_help() -> str:
     return "\n".join(
         [
-            "請輸入：代號 股價 股數（股數可省略）",
-            "例如：2330 950",
-            "例如：2330 950 1000",
+            "請輸入：代號，或代號 股價 股數（股數可省略）",
+            "查股價：2330",
+            "建議股數：2330 950",
+            "買賣試算：2330 950 1000",
             "目前手續費折扣固定為 1.8折。",
+        ]
+    )
+
+
+def _format_quote_reply(stock_code: str, quote_lookup) -> str:
+    try:
+        quote = quote_lookup(stock_code)
+    except StockQuoteError:
+        return "\n".join(
+            [
+                f"代號：{stock_code}",
+                "查不到目前股價。",
+                "請確認代號是否正確，或稍後再試。",
+            ]
+        )
+
+    return "\n".join(
+        [
+            f"代號：{quote.stock_code}",
+            f"名稱：{quote.name}",
+            f"目前股價：{_format_decimal(quote.price)} 元",
+            f"資料來源：{quote.source}",
+            "---",
+            f"可輸入：{quote.stock_code} {_format_decimal(quote.price)}",
+            f"或：{quote.stock_code} {_format_decimal(quote.price)} 1000",
         ]
     )
 
