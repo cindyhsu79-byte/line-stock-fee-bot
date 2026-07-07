@@ -9,6 +9,7 @@ from stock_fee_bot.fees import (
     format_help,
     format_reply,
     parse_message,
+    should_ignore_text,
     suggest_minimum_shares,
 )
 from stock_fee_bot.quote import StockQuote, StockQuoteError
@@ -99,6 +100,14 @@ class MessageParsingTest(unittest.TestCase):
     def test_rejects_invalid_message(self):
         with self.assertRaises(InvalidMessageError):
             parse_message("幫我算一下")
+
+
+class ChatIgnoreTest(unittest.TestCase):
+    def test_ignores_plain_chat_text(self):
+        self.assertTrue(should_ignore_text("真厲害"))
+        self.assertTrue(should_ignore_text("謝謝"))
+        self.assertFalse(should_ignore_text("2330"))
+        self.assertFalse(should_ignore_text("2330 100"))
 
 
 class ReplyFormattingTest(unittest.TestCase):
