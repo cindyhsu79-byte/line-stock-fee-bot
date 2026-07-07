@@ -9,6 +9,7 @@ FEE_RATE = Decimal("0.001425")
 SELL_TAX_RATE = Decimal("0.003")
 MINIMUM_FEE = 20
 DEFAULT_DISCOUNT = Decimal("0.18")
+PRICE_CONFIRMATION_TOLERANCE = Decimal("0.20")
 
 
 class InvalidMessageError(ValueError):
@@ -164,7 +165,7 @@ def format_reply(parsed: ParsedInput, quote_lookup=fetch_stock_quote) -> str:
         return _format_quote_reply(parsed.stock_code, quote_lookup)
 
     if parsed.shares is None:
-        return _format_suggestion_reply(parsed, suggest_minimum_shares(parsed.price, parsed.discount))
+        return _format_price_or_shares_reply(parsed, quote_lookup)
 
     round_trip = calculate_round_trip(parsed.price, parsed.shares, parsed.discount)
     discount_label = _format_discount_label(round_trip.discount)
@@ -184,6 +185,30 @@ def format_reply(parsed: ParsedInput, quote_lookup=fetch_stock_quote) -> str:
             f"買賣合計成本：{round_trip.total_cost:,} 元",
         ]
     )
+
+
+def _format_price_or_shares_reply(parsed: ParsedInput, quote_lookup) -> str:
+    if parsed.price is None:
+        return _format_quote_reply(parsed.stock_code, quote_lookup)
+
+    try:
+        quote = quote_lookup(parsed.stock_code)
+    except StockQuoteError:
+        return _format_suggestion_reply(parsed, suggest_minimum_shares(parsed.price, parsed.discount))
+
+    if _looks_like_shares(parsed.price, quote.price):
+        shares = int(parsed.price)
+        return format_reply(
+            ParsedInput(
+                stock_code=parsed.stock_code,
+                price=quote.price,
+                shares=shares,
+                discount=parsed.discount,
+            ),
+            quote_lookup=quote_lookup,
+        )
+
+    return _format_suggestion_reply(parsed, suggest_minimum_shares(parsed.price, parsed.discount))
 
 
 def format_help() -> str:
@@ -259,3 +284,11 @@ def _format_discount_label(discount: float | Decimal) -> str:
 
 def _format_decimal(value: Decimal) -> str:
     return f"{value.normalize():f}"
+
+
+def _looks_like_shares(candidate: Decimal, market_price: Decimal) -> bool:
+    if candidate != candidate.to_integral_value():
+        return False
+
+    difference_ratio = abs(candidate - market_price) / market_price
+    return difference_ratio > PRICE_CONFIRMATION_TOLERANCE
