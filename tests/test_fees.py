@@ -1,4 +1,5 @@
 import unittest
+from decimal import Decimal
 
 from stock_fee_bot.fees import (
     DEFAULT_DISCOUNT,
@@ -10,6 +11,7 @@ from stock_fee_bot.fees import (
     parse_message,
     suggest_minimum_shares,
 )
+from stock_fee_bot.quote import StockQuote
 
 
 class FeeCalculationTest(unittest.TestCase):
@@ -59,6 +61,13 @@ class SuggestionTest(unittest.TestCase):
 
 
 class MessageParsingTest(unittest.TestCase):
+    def test_parses_four_digits_as_quote_request(self):
+        parsed = parse_message("2330")
+
+        self.assertEqual(parsed.stock_code, "2330")
+        self.assertIsNone(parsed.price)
+        self.assertIsNone(parsed.shares)
+
     def test_parses_code_price_as_suggestion_request(self):
         parsed = parse_message("2330 950")
 
@@ -83,16 +92,24 @@ class MessageParsingTest(unittest.TestCase):
         self.assertEqual(parsed.shares, 1000)
         self.assertEqual(parsed.discount, 0.18)
 
-    def test_rejects_missing_price(self):
-        with self.assertRaises(InvalidMessageError):
-            parse_message("2330")
-
     def test_rejects_invalid_message(self):
         with self.assertRaises(InvalidMessageError):
             parse_message("幫我算一下")
 
 
 class ReplyFormattingTest(unittest.TestCase):
+    def test_formats_quote_reply_for_four_digit_input(self):
+        def fake_lookup(stock_code):
+            self.assertEqual(stock_code, "2330")
+            return StockQuote(stock_code="2330", name="台積電", price=Decimal("950"), source="TWSE")
+
+        reply = format_reply(parse_message("2330"), quote_lookup=fake_lookup)
+
+        self.assertIn("代號：2330", reply)
+        self.assertIn("名稱：台積電", reply)
+        self.assertIn("目前股價：950 元", reply)
+        self.assertIn("可輸入：2330 950", reply)
+
     def test_formats_round_trip_reply_for_line(self):
         reply = format_reply(parse_message("2330 50 1000"))
 
@@ -123,7 +140,8 @@ class ReplyFormattingTest(unittest.TestCase):
     def test_help_includes_new_examples(self):
         help_text = format_help()
 
-        self.assertIn("代號 股價 股數", help_text)
+        self.assertIn("代號", help_text)
+        self.assertIn("2330", help_text)
         self.assertIn("2330 950", help_text)
         self.assertIn("2330 950 1000", help_text)
 
