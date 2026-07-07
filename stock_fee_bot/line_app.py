@@ -30,16 +30,20 @@ class LineBotHandler(BaseHTTPRequestHandler):
 
         body = self.rfile.read(int(self.headers.get("Content-Length", "0")))
         if not self._is_valid_signature(body):
+            print("Rejected webhook: invalid LINE signature", flush=True)
             self._send_json(403, {"error": "invalid signature"})
             return
 
         try:
             payload = json.loads(body.decode("utf-8"))
         except json.JSONDecodeError:
+            print("Rejected webhook: invalid JSON", flush=True)
             self._send_json(400, {"error": "invalid json"})
             return
 
-        for event in payload.get("events", []):
+        events = payload.get("events", [])
+        print(f"Webhook received: {len(events)} event(s)", flush=True)
+        for event in events:
             self._handle_event(event)
 
         self._send_json(200, {"ok": True})
@@ -49,13 +53,16 @@ class LineBotHandler(BaseHTTPRequestHandler):
 
     def _handle_event(self, event):
         if event.get("type") != "message":
+            print(f"Skipped event type: {event.get('type')}", flush=True)
             return
         if event.get("message", {}).get("type") != "text":
+            print(f"Skipped message type: {event.get('message', {}).get('type')}", flush=True)
             return
 
         text = event["message"].get("text", "")
         reply_token = event.get("replyToken")
         if not reply_token:
+            print("Skipped text event: missing reply token", flush=True)
             return
 
         try:
@@ -63,6 +70,7 @@ class LineBotHandler(BaseHTTPRequestHandler):
         except (InvalidMessageError, ValueError):
             reply_text = format_help()
 
+        print(f"Replying to text event: {text!r}", flush=True)
         reply_to_line(reply_token, reply_text)
 
     def _is_valid_signature(self, body):
@@ -87,7 +95,7 @@ class LineBotHandler(BaseHTTPRequestHandler):
 def reply_to_line(reply_token, text):
     access_token = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN")
     if not access_token:
-        print(text)
+        print(text, flush=True)
         return
 
     body = json.dumps(
@@ -109,12 +117,13 @@ def reply_to_line(reply_token, text):
     try:
         with urllib.request.urlopen(request, timeout=10) as response:
             response.read()
+            print(f"LINE reply succeeded: HTTP {response.status}", flush=True)
     except urllib.error.URLError as error:
-        print(f"LINE reply failed: {error}")
+        print(f"LINE reply failed: {error}", flush=True)
 
 
 def run(host="0.0.0.0", port=None):
     resolved_port = int(port or os.environ.get("PORT", "8000"))
     server = ThreadingHTTPServer((host, resolved_port), LineBotHandler)
-    print(f"LINE stock fee bot listening on http://{host}:{resolved_port}")
+    print(f"LINE stock fee bot listening on http://{host}:{resolved_port}", flush=True)
     server.serve_forever()
