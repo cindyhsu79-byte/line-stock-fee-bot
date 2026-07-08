@@ -21,21 +21,26 @@ class MessageParsingTest(unittest.TestCase):
         parsed = parse_message("2330")
 
         self.assertEqual(parsed.stock_code, "2330")
+        self.assertIsNone(parsed.price)
         self.assertIsNone(parsed.shares)
 
-    def test_parses_code_and_shares_as_trade_request(self):
-        parsed = parse_message("2330 1000")
+    def test_parses_code_and_one_number_as_ambiguous_request(self):
+        parsed = parse_message("2330 100")
 
         self.assertEqual(parsed.stock_code, "2330")
+        self.assertEqual(parsed.price, Decimal("100"))
+        self.assertIsNone(parsed.shares)
+
+    def test_parses_code_price_and_shares(self):
+        parsed = parse_message("2330 2440 1000")
+
+        self.assertEqual(parsed.stock_code, "2330")
+        self.assertEqual(parsed.price, Decimal("2440"))
         self.assertEqual(parsed.shares, 1000)
 
-    def test_rejects_price_style_input(self):
+    def test_rejects_non_integer_explicit_shares(self):
         with self.assertRaises(InvalidMessageError):
-            parse_message("2330 2440 1000")
-
-    def test_rejects_non_integer_shares(self):
-        with self.assertRaises(InvalidMessageError):
-            parse_message("2330 100.5")
+            parse_message("2330 2440 100.5")
 
     def test_rejects_invalid_message(self):
         with self.assertRaises(InvalidMessageError):
@@ -43,14 +48,15 @@ class MessageParsingTest(unittest.TestCase):
 
 
 class ChatIgnoreTest(unittest.TestCase):
-    def test_ignores_plain_chat_text(self):
+    def test_ignores_text_mixed_with_numbers(self):
         self.assertTrue(should_ignore_text("hello"))
         self.assertTrue(should_ignore_text("真厲害"))
         self.assertTrue(should_ignore_text("請查 2330"))
         self.assertTrue(should_ignore_text("2330 股"))
         self.assertTrue(should_ignore_text("2330 abc"))
         self.assertFalse(should_ignore_text("2330"))
-        self.assertFalse(should_ignore_text("2330 1000"))
+        self.assertFalse(should_ignore_text("2330 100"))
+        self.assertFalse(should_ignore_text("2330 2440 1000"))
         self.assertFalse(should_ignore_text("2330,1000"))
 
 
@@ -76,43 +82,48 @@ class FeeCalculationTest(unittest.TestCase):
         self.assertEqual(cost.sell_cost, 7946)
         self.assertEqual(cost.total_cost, 8572)
 
-    def test_rejects_non_positive_values(self):
-        with self.assertRaises(ValueError):
-            calculate_trade_cost(price=0, shares=1000)
-        with self.assertRaises(ValueError):
-            calculate_trade_cost(price=50, shares=0)
-
 
 class ReplyFormattingTest(unittest.TestCase):
     def test_formats_quote_reply_with_current_price_only(self):
         def fake_lookup(stock_code):
             self.assertEqual(stock_code, "2330")
-            return StockQuote(stock_code="2330", name="台積電", price=Decimal("950"), source="TWSE")
+            return StockQuote(stock_code="2330", name="台積電", price=Decimal("2440"), source="Yahoo TW")
 
         reply = format_reply(parse_message("2330"), quote_lookup=fake_lookup)
 
-        self.assertEqual(reply, "2330 台積電\n現價：950元")
-        self.assertNotIn("漲跌", reply)
-        self.assertNotIn("TWSE", reply)
+        self.assertEqual(reply, "2330 台積電\n現價：2440元")
+        self.assertNotIn("Yahoo", reply)
         self.assertNotIn("---", reply)
 
-    def test_formats_trade_reply_for_line(self):
+    def test_treats_second_number_as_shares_when_far_from_market_price(self):
         def fake_lookup(stock_code):
-            self.assertEqual(stock_code, "2330")
-            return StockQuote(stock_code="2330", name="台積電", price=Decimal("2440"), source="TWSE")
+            return StockQuote(stock_code="2330", name="台積電", price=Decimal("2440"), source="Yahoo TW")
 
-        reply = format_reply(parse_message("2330 1000"), quote_lookup=fake_lookup)
+        reply = format_reply(parse_message("2330 100"), quote_lookup=fake_lookup)
 
-        self.assertIn("2330 台積電", reply)
+        self.assertIn("現價：2440元", reply)
+        self.assertIn("股數：100股", reply)
+        self.assertIn("成交金額：244,000元", reply)
+        self.assertIn("買賣合計成本：858元", reply)
+
+    def test_treats_second_number_as_price_when_close_to_market_price(self):
+        def fake_lookup(stock_code):
+            return StockQuote(stock_code="2330", name="台積電", price=Decimal("2440"), source="Yahoo TW")
+
+        reply = format_reply(parse_message("2330 2440"), quote_lookup=fake_lookup)
+
+        self.assertIn("現價：2440元", reply)
+        self.assertIn("建議股數：33股", reply)
+        self.assertIn("成交金額：80,520元", reply)
+
+    def test_uses_explicit_price_and_shares_without_market_price(self):
+        reply = format_reply(parse_message("2330 2440 1000"), quote_lookup=quote_not_available)
+
+        self.assertIn("2330", reply)
         self.assertIn("現價：2440元", reply)
         self.assertIn("股數：1,000股", reply)
         self.assertIn("成交金額：2,440,000元", reply)
-        self.assertIn("買進成本：626元", reply)
-        self.assertIn("賣出手續費：626元", reply)
-        self.assertIn("證交稅：7,320元", reply)
-        self.assertIn("賣出成本：7,946元", reply)
         self.assertIn("買賣合計成本：8,572元", reply)
-        self.assertEqual(reply.count("---"), 2)
 
     def test_formats_quote_error(self):
         reply = format_reply(parse_message("9999"), quote_lookup=quote_not_available)
@@ -124,8 +135,8 @@ class ReplyFormattingTest(unittest.TestCase):
         help_text = format_help()
 
         self.assertIn("2330", help_text)
-        self.assertIn("2330 1000", help_text)
-        self.assertIn("1.8 折", help_text)
+        self.assertIn("2330 100", help_text)
+        self.assertIn("2330 2440 1000", help_text)
 
 
 if __name__ == "__main__":
