@@ -14,9 +14,16 @@ class StockQuoteError(ValueError):
 class StockQuote:
     stock_code: str
     name: str
+    price: Decimal
+    source: str
+
+
+@dataclass(frozen=True)
+class _MarketResult:
+    stock_code: str
+    name: str
     price: Decimal | None
     source: str
-    change: Decimal | None = None
 
 
 _URL_TIMEOUT_SECONDS = 10
@@ -26,36 +33,44 @@ _SSL_CONTEXT = ssl._create_unverified_context()
 def fetch_stock_quote(stock_code: str, urlopen=urllib.request.urlopen) -> StockQuote:
     normalized_code = stock_code.strip()
     if not normalized_code.isdigit() or len(normalized_code) != 4:
-        raise StockQuoteError("stock code must be 4 digits")
+        raise StockQuoteError("股票代號必須是 4 碼")
 
-    markets = [
+    preferred_name: str | None = None
+    for source, exchange_code in (
         ("TWSE", f"tse_{normalized_code}.tw"),
         ("TPEx", f"otc_{normalized_code}.tw"),
-    ]
+    ):
+        market = _fetch_market_quote(normalized_code, exchange_code, source, urlopen)
+        if market is None:
+            continue
 
-    preferred_name = None
-    for source, exchange_code in markets:
-        quote = _fetch_market_quote(normalized_code, exchange_code, source, urlopen)
-        if quote is not None:
-            preferred_name = quote.name
-            if quote.price is None:
-                continue
-            return quote
+        if preferred_name is None or market.name != market.stock_code:
+            preferred_name = market.name
+        if market.price is not None:
+            return StockQuote(
+                stock_code=market.stock_code,
+                name=market.name,
+                price=market.price,
+                source=market.source,
+            )
 
-    yahoo_symbols = [
+    for source, symbol in (
         ("Yahoo TW", f"{normalized_code}.TW"),
         ("Yahoo TWO", f"{normalized_code}.TWO"),
-    ]
-
-    for source, symbol in yahoo_symbols:
-        quote = _fetch_yahoo_quote(normalized_code, symbol, source, urlopen, preferred_name)
+    ):
+        quote = _fetch_yahoo_quote(normalized_code, symbol, source, preferred_name, urlopen)
         if quote is not None:
             return quote
 
-    raise StockQuoteError(f"cannot fetch quote for {normalized_code}")
+    raise StockQuoteError(f"查不到 {normalized_code} 的現價")
 
 
-def _fetch_market_quote(stock_code: str, exchange_code: str, source: str, urlopen) -> StockQuote | None:
+def _fetch_market_quote(
+    stock_code: str,
+    exchange_code: str,
+    source: str,
+    urlopen,
+) -> _MarketResult | None:
     query = urllib.parse.urlencode({"ex_ch": exchange_code, "json": "1", "delay": "0"})
     request = urllib.request.Request(
         f"https://mis.twse.com.tw/stock/api/getStockInfo.jsp?{query}",
@@ -71,17 +86,18 @@ def _fetch_market_quote(stock_code: str, exchange_code: str, source: str, urlope
         return None
 
     for item in payload.get("msgArray", []):
+        code = item.get("c") or stock_code
+        name = item.get("n") or code
         price = _parse_price(item.get("z"))
-        reference_price = _parse_price(item.get("y"))
-        if price is None and reference_price is None:
+
+        if code != stock_code:
             continue
 
-        return StockQuote(
-            stock_code=item.get("c") or stock_code,
-            name=item.get("n") or stock_code,
+        return _MarketResult(
+            stock_code=code,
+            name=name,
             price=price,
             source=source,
-            change=price - reference_price if price is not None and reference_price is not None else None,
         )
 
     return None
@@ -91,8 +107,8 @@ def _fetch_yahoo_quote(
     stock_code: str,
     symbol: str,
     source: str,
+    preferred_name: str | None,
     urlopen,
-    preferred_name: str | None = None,
 ) -> StockQuote | None:
     request = urllib.request.Request(
         f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?range=1d&interval=1m",
@@ -101,27 +117,19 @@ def _fetch_yahoo_quote(
 
     try:
         payload = _read_json(request, urlopen)
+        meta = payload["chart"]["result"][0]["meta"]
     except Exception:
         return None
 
-    try:
-        meta = payload["chart"]["result"][0]["meta"]
-    except (KeyError, IndexError, TypeError):
-        return None
-
-    raw_price = meta.get("regularMarketPrice")
-    price = _parse_price(str(raw_price) if raw_price is not None else None)
+    price = _parse_price(str(meta.get("regularMarketPrice")))
     if price is None:
         return None
-    raw_previous_close = meta.get("regularMarketPreviousClose") or meta.get("chartPreviousClose")
-    previous_close = _parse_price(str(raw_previous_close) if raw_previous_close is not None else None)
 
     return StockQuote(
         stock_code=stock_code,
         name=preferred_name or meta.get("shortName") or meta.get("longName") or stock_code,
         price=price,
         source=source,
-        change=price - previous_close if previous_close is not None else None,
     )
 
 
@@ -135,7 +143,7 @@ def _read_json(request: urllib.request.Request, urlopen) -> dict:
 
 
 def _parse_price(value: str | None) -> Decimal | None:
-    if value is None or value in {"", "-", "--"}:
+    if value is None or value in {"", "-", "--", "None"}:
         return None
 
     try:
