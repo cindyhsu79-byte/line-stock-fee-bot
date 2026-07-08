@@ -9,6 +9,7 @@ FEE_RATE = Decimal("0.001425")
 DISCOUNT_RATE = Decimal("0.18")
 MINIMUM_FEE = 20
 SELL_TAX_RATE = Decimal("0.003")
+ACCEPTED_MESSAGE_RE = re.compile(r"^\s*\d{4}(?:[\s,]+\d+)?\s*$")
 
 
 class InvalidMessageError(ValueError):
@@ -35,6 +36,9 @@ class TradeCost:
 
 
 def parse_message(text: str) -> ParsedInput:
+    if not ACCEPTED_MESSAGE_RE.fullmatch(text):
+        raise InvalidMessageError("請只輸入股票代號，或股票代號和股數")
+
     numbers = re.findall(r"\d+(?:\.\d+)?", text.replace(",", " "))
 
     if not numbers:
@@ -57,7 +61,7 @@ def parse_message(text: str) -> ParsedInput:
 
 
 def should_ignore_text(text: str) -> bool:
-    return not re.search(r"\d", text)
+    return not ACCEPTED_MESSAGE_RE.fullmatch(text)
 
 
 def calculate_trade_cost(price: float | Decimal, shares: int) -> TradeCost:
