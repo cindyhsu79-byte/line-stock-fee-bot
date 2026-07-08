@@ -117,7 +117,7 @@ class ReplyFormattingTest(unittest.TestCase):
 
         reply = format_reply(parse_message("2330"), quote_lookup=fake_lookup)
 
-        self.assertEqual(reply, "代號：2330\n名稱：台積電\n目前股價：950 元")
+        self.assertEqual(reply, "2330 台積電\n目前股價：950元 +0")
 
     def test_formats_round_trip_reply_for_line(self):
         reply = format_reply(parse_message("2330 50 1000"))
@@ -170,11 +170,11 @@ class ReplyFormattingTest(unittest.TestCase):
     def test_quote_reply_only_contains_code_name_and_price(self):
         def fake_lookup(stock_code):
             self.assertEqual(stock_code, "2330")
-            return StockQuote(stock_code="2330", name="TSMC", price=Decimal("950"), source="TWSE")
+            return StockQuote(stock_code="2330", name="TSMC", price=Decimal("950"), source="TWSE", change=Decimal("20"))
 
         reply = format_reply(parse_message("2330"), quote_lookup=fake_lookup)
 
-        self.assertEqual(len(reply.splitlines()), 3)
+        self.assertEqual(reply, "2330 TSMC\n目前股價：950元 +20")
         self.assertNotIn("TWSE", reply)
         self.assertNotIn("---", reply)
         self.assertNotIn("2330 950", reply)
