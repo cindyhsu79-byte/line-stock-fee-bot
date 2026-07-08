@@ -13,6 +13,7 @@ class QuoteLookupTest(unittest.TestCase):
                     "c": "2330",
                     "n": "台積電",
                     "z": "950.00",
+                    "y": "930.00",
                 }
             ]
         }
@@ -25,6 +26,7 @@ class QuoteLookupTest(unittest.TestCase):
         self.assertEqual(quote.stock_code, "2330")
         self.assertEqual(quote.name, "台積電")
         self.assertEqual(quote.price, Decimal("950.00"))
+        self.assertEqual(quote.change, Decimal("20.00"))
         self.assertEqual(quote.source, "TWSE")
 
     def test_tries_otc_when_twse_has_no_price(self):
@@ -46,7 +48,19 @@ class QuoteLookupTest(unittest.TestCase):
         responses = [
             {"msgArray": []},
             {"msgArray": []},
-            {"chart": {"result": [{"meta": {"regularMarketPrice": 950.5, "shortName": "TSMC"}}]}},
+            {
+                "chart": {
+                    "result": [
+                        {
+                            "meta": {
+                                "regularMarketPrice": 950.5,
+                                "regularMarketPreviousClose": 930.5,
+                                "shortName": "TSMC",
+                            }
+                        }
+                    ]
+                }
+            },
         ]
 
         def fake_urlopen(request, timeout):
@@ -57,6 +71,7 @@ class QuoteLookupTest(unittest.TestCase):
         self.assertEqual(quote.stock_code, "2330")
         self.assertEqual(quote.name, "TSMC")
         self.assertEqual(quote.price, Decimal("950.5"))
+        self.assertEqual(quote.change, Decimal("20.0"))
         self.assertEqual(quote.source, "Yahoo TW")
 
     def test_raises_when_no_price_is_available(self):
