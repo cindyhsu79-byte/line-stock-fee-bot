@@ -74,6 +74,34 @@ class QuoteLookupTest(unittest.TestCase):
         self.assertEqual(quote.change, Decimal("20.0"))
         self.assertEqual(quote.source, "Yahoo TW")
 
+    def test_uses_yahoo_price_when_twse_has_name_but_no_last_price(self):
+        responses = [
+            {"msgArray": [{"c": "2330", "n": "TSMC TW", "z": "-", "y": "2465.00"}]},
+            {"msgArray": []},
+            {
+                "chart": {
+                    "result": [
+                        {
+                            "meta": {
+                                "regularMarketPrice": 2440,
+                                "chartPreviousClose": 2465,
+                                "shortName": "TSMC",
+                            }
+                        }
+                    ]
+                }
+            },
+        ]
+
+        def fake_urlopen(request, timeout):
+            return FakeResponse(responses.pop(0))
+
+        quote = fetch_stock_quote("2330", urlopen=fake_urlopen)
+
+        self.assertEqual(quote.name, "TSMC TW")
+        self.assertEqual(quote.price, Decimal("2440"))
+        self.assertEqual(quote.change, Decimal("-25"))
+
     def test_raises_when_no_price_is_available(self):
         def fake_urlopen(request, timeout):
             return FakeResponse({"msgArray": []})
