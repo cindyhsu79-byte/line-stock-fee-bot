@@ -1,4 +1,5 @@
 import json
+import re
 import ssl
 import urllib.parse
 import urllib.request
@@ -105,35 +106,54 @@ def _fetch_yahoo_quote(
     urlopen,
 ) -> StockQuote | None:
     request = urllib.request.Request(
-        f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?range=1d&interval=1m",
-        headers={"User-Agent": "Mozilla/5.0"},
+        f"https://tw.stock.yahoo.com/quote/{symbol}",
+        headers={
+            "User-Agent": "Mozilla/5.0",
+            "Accept-Language": "zh-TW,zh;q=0.9",
+        },
     )
 
     try:
-        payload = _read_json(request, urlopen)
-        meta = payload["chart"]["result"][0]["meta"]
+        page = _read_text(request, urlopen)
     except Exception:
         return None
 
-    price = _parse_price(str(meta.get("regularMarketPrice")))
+    symbol_pattern = re.escape(symbol)
+    quote_match = re.search(
+        rf'"symbol":"{symbol_pattern}".{{0,2000}}?"regularMarketPrice":(?P<price>\d+(?:\.\d+)?)',
+        page,
+    )
+    if quote_match is None:
+        return None
+
+    price = _parse_price(quote_match.group("price"))
     if price is None:
         return None
 
+    name = preferred_name
+    name_match = re.search(r'"name":"(?P<name>[^"]+)"', quote_match.group(0))
+    if name is None and name_match is not None:
+        name = _decode_json_string(name_match.group("name"))
+
     return StockQuote(
         stock_code=stock_code,
-        name=preferred_name or meta.get("shortName") or meta.get("longName") or stock_code,
+        name=name or stock_code,
         price=price,
         source=source,
     )
 
 
 def _read_json(request: urllib.request.Request, urlopen) -> dict:
+    return json.loads(_read_text(request, urlopen))
+
+
+def _read_text(request: urllib.request.Request, urlopen) -> str:
     try:
         with urlopen(request, timeout=_URL_TIMEOUT_SECONDS, context=_SSL_CONTEXT) as response:
-            return json.loads(response.read().decode("utf-8"))
+            return response.read().decode("utf-8")
     except TypeError:
         with urlopen(request, timeout=_URL_TIMEOUT_SECONDS) as response:
-            return json.loads(response.read().decode("utf-8"))
+            return response.read().decode("utf-8")
 
 
 def _parse_price(value: str | None) -> Decimal | None:
@@ -144,3 +164,10 @@ def _parse_price(value: str | None) -> Decimal | None:
         return Decimal(value)
     except InvalidOperation:
         return None
+
+
+def _decode_json_string(value: str) -> str:
+    try:
+        return json.loads(f'"{value}"')
+    except json.JSONDecodeError:
+        return value
