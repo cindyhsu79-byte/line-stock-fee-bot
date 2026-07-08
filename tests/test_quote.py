@@ -6,21 +6,10 @@ from stock_fee_bot.quote import StockQuoteError, fetch_stock_quote
 
 
 class QuoteLookupTest(unittest.TestCase):
-    def test_uses_yahoo_price_with_twse_name(self):
+    def test_uses_yahoo_tw_page_price_with_twse_name(self):
         responses = [
             {"msgArray": [{"c": "2330", "n": "台積電", "z": "950.00"}]},
-            {
-                "chart": {
-                    "result": [
-                        {
-                            "meta": {
-                                "regularMarketPrice": 960.5,
-                                "shortName": "TSMC",
-                            }
-                        }
-                    ]
-                }
-            },
+            '"symbol":"2330.TW","name":"台積電","regularMarketTime":1783477740,"regularMarketPrice":2445,"chartPreviousClose":2440',
         ]
 
         def fake_urlopen(request, timeout):
@@ -30,26 +19,15 @@ class QuoteLookupTest(unittest.TestCase):
 
         self.assertEqual(quote.stock_code, "2330")
         self.assertEqual(quote.name, "台積電")
-        self.assertEqual(quote.price, Decimal("960.5"))
+        self.assertEqual(quote.price, Decimal("2445"))
         self.assertEqual(quote.source, "Yahoo TW")
 
     def test_uses_yahoo_two_for_otc_stock(self):
         responses = [
             {"msgArray": []},
             {"msgArray": [{"c": "1234", "n": "上櫃公司", "z": "12.35"}]},
-            {"chart": {"result": [{"meta": {}}]}},
-            {
-                "chart": {
-                    "result": [
-                        {
-                            "meta": {
-                                "regularMarketPrice": 13.4,
-                                "shortName": "OTC",
-                            }
-                        }
-                    ]
-                }
-            },
+            'no price here',
+            '"symbol":"1234.TWO","name":"上櫃公司","regularMarketPrice":13.4',
         ]
 
         def fake_urlopen(request, timeout):
@@ -65,18 +43,7 @@ class QuoteLookupTest(unittest.TestCase):
         responses = [
             {"msgArray": []},
             {"msgArray": []},
-            {
-                "chart": {
-                    "result": [
-                        {
-                            "meta": {
-                                "regularMarketPrice": 950.5,
-                                "shortName": "TSMC",
-                            }
-                        }
-                    ]
-                }
-            },
+            '"symbol":"2330.TW","name":"台積電","regularMarketPrice":950.5',
         ]
 
         def fake_urlopen(request, timeout):
@@ -84,15 +51,15 @@ class QuoteLookupTest(unittest.TestCase):
 
         quote = fetch_stock_quote("2330", urlopen=fake_urlopen)
 
-        self.assertEqual(quote.name, "TSMC")
+        self.assertEqual(quote.name, "台積電")
         self.assertEqual(quote.price, Decimal("950.5"))
         self.assertEqual(quote.source, "Yahoo TW")
 
     def test_raises_when_yahoo_has_no_price(self):
         responses = [
             {"msgArray": [{"c": "2330", "n": "台積電", "z": "950.00"}]},
-            {"chart": {"result": [{"meta": {"shortName": "TSMC"}}]}},
-            {"chart": {"result": [{"meta": {"shortName": "TSMC"}}]}},
+            '"symbol":"2330.TW","name":"台積電","chartPreviousClose":2440',
+            '"symbol":"2330.TWO","name":"台積電","chartPreviousClose":2440',
         ]
 
         def fake_urlopen(request, timeout):
@@ -117,6 +84,8 @@ class FakeResponse:
         return False
 
     def read(self):
+        if isinstance(self.payload, str):
+            return self.payload.encode("utf-8")
         return json.dumps(self.payload).encode("utf-8")
 
 
