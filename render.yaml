@@ -2,6 +2,17 @@ services:
   - type: web
     name: line-stock-fee-bot
     runtime: python
+    buildCommand: python -m py_compile stock_fee_bot/quote.py stock_fee_bot/fees.py stock_fee_bot/line_app.py run_line_bot.py
+    startCommand: python run_line_bot.py
+    envVars:
+      - key: LINE_CHANNEL_SECRET
+        sync: false
+      - key: LINE_CHANNEL_ACCESS_TOKEN
+        sync: false
+services:
+  - type: web
+    name: line-stock-fee-bot
+    runtime: python
     buildCommand: python -m py_compile stock_fee_bot/fees.py stock_fee_bot/line_app.py run_line_bot.py
     startCommand: python run_line_bot.py
     envVars:
