@@ -14,7 +14,7 @@ LINE_REPLY_URL = "https://api.line.me/v2/bot/message/reply"
 
 
 class LineBotHandler(BaseHTTPRequestHandler):
-    server_version = "LineStockFeeBot/0.1"
+    server_version = "LineStockFeeBot/1.0"
 
     def do_GET(self):
         if self.path == "/health":
@@ -55,11 +55,13 @@ class LineBotHandler(BaseHTTPRequestHandler):
         if event.get("type") != "message":
             print(f"Skipped event type: {event.get('type')}", flush=True)
             return
-        if event.get("message", {}).get("type") != "text":
-            print(f"Skipped message type: {event.get('message', {}).get('type')}", flush=True)
+
+        message = event.get("message", {})
+        if message.get("type") != "text":
+            print(f"Skipped message type: {message.get('type')}", flush=True)
             return
 
-        text = event["message"].get("text", "")
+        text = message.get("text", "")
         reply_token = event.get("replyToken")
         if not reply_token:
             print("Skipped text event: missing reply token", flush=True)
@@ -129,5 +131,5 @@ def reply_to_line(reply_token, text):
 def run(host="0.0.0.0", port=None):
     resolved_port = int(port or os.environ.get("PORT", "8000"))
     server = ThreadingHTTPServer((host, resolved_port), LineBotHandler)
-    print(f"LINE stock fee bot listening on http://{host}:{resolved_port}")
+    print(f"LINE stock fee bot listening on http://{host}:{resolved_port}", flush=True)
     server.serve_forever()
