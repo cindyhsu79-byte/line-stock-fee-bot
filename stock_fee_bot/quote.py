@@ -16,6 +16,7 @@ class StockQuote:
     name: str
     price: Decimal
     source: str
+    change: Decimal | None = None
 
 
 _URL_TIMEOUT_SECONDS = 10
@@ -69,12 +70,14 @@ def _fetch_market_quote(stock_code: str, exchange_code: str, source: str, urlope
         price = _parse_price(item.get("z")) or _parse_price(item.get("y"))
         if price is None:
             continue
+        reference_price = _parse_price(item.get("y"))
 
         return StockQuote(
             stock_code=item.get("c") or stock_code,
             name=item.get("n") or stock_code,
             price=price,
             source=source,
+            change=price - reference_price if reference_price is not None else None,
         )
 
     return None
@@ -100,12 +103,15 @@ def _fetch_yahoo_quote(stock_code: str, symbol: str, source: str, urlopen) -> St
     price = _parse_price(str(raw_price) if raw_price is not None else None)
     if price is None:
         return None
+    raw_previous_close = meta.get("regularMarketPreviousClose")
+    previous_close = _parse_price(str(raw_previous_close) if raw_previous_close is not None else None)
 
     return StockQuote(
         stock_code=stock_code,
         name=meta.get("shortName") or meta.get("longName") or stock_code,
         price=price,
         source=source,
+        change=price - previous_close if previous_close is not None else None,
     )
 
 
