@@ -14,7 +14,7 @@ class StockQuoteError(ValueError):
 class StockQuote:
     stock_code: str
     name: str
-    price: Decimal
+    price: Decimal | None
     source: str
     change: Decimal | None = None
 
@@ -33,9 +33,13 @@ def fetch_stock_quote(stock_code: str, urlopen=urllib.request.urlopen) -> StockQ
         ("TPEx", f"otc_{normalized_code}.tw"),
     ]
 
+    preferred_name = None
     for source, exchange_code in markets:
         quote = _fetch_market_quote(normalized_code, exchange_code, source, urlopen)
         if quote is not None:
+            preferred_name = quote.name
+            if quote.price is None:
+                continue
             return quote
 
     yahoo_symbols = [
@@ -44,7 +48,7 @@ def fetch_stock_quote(stock_code: str, urlopen=urllib.request.urlopen) -> StockQ
     ]
 
     for source, symbol in yahoo_symbols:
-        quote = _fetch_yahoo_quote(normalized_code, symbol, source, urlopen)
+        quote = _fetch_yahoo_quote(normalized_code, symbol, source, urlopen, preferred_name)
         if quote is not None:
             return quote
 
@@ -67,23 +71,29 @@ def _fetch_market_quote(stock_code: str, exchange_code: str, source: str, urlope
         return None
 
     for item in payload.get("msgArray", []):
-        price = _parse_price(item.get("z")) or _parse_price(item.get("y"))
-        if price is None:
-            continue
+        price = _parse_price(item.get("z"))
         reference_price = _parse_price(item.get("y"))
+        if price is None and reference_price is None:
+            continue
 
         return StockQuote(
             stock_code=item.get("c") or stock_code,
             name=item.get("n") or stock_code,
             price=price,
             source=source,
-            change=price - reference_price if reference_price is not None else None,
+            change=price - reference_price if price is not None and reference_price is not None else None,
         )
 
     return None
 
 
-def _fetch_yahoo_quote(stock_code: str, symbol: str, source: str, urlopen) -> StockQuote | None:
+def _fetch_yahoo_quote(
+    stock_code: str,
+    symbol: str,
+    source: str,
+    urlopen,
+    preferred_name: str | None = None,
+) -> StockQuote | None:
     request = urllib.request.Request(
         f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?range=1d&interval=1m",
         headers={"User-Agent": "Mozilla/5.0"},
@@ -103,12 +113,12 @@ def _fetch_yahoo_quote(stock_code: str, symbol: str, source: str, urlopen) -> St
     price = _parse_price(str(raw_price) if raw_price is not None else None)
     if price is None:
         return None
-    raw_previous_close = meta.get("regularMarketPreviousClose")
+    raw_previous_close = meta.get("regularMarketPreviousClose") or meta.get("chartPreviousClose")
     previous_close = _parse_price(str(raw_previous_close) if raw_previous_close is not None else None)
 
     return StockQuote(
         stock_code=stock_code,
-        name=meta.get("shortName") or meta.get("longName") or stock_code,
+        name=preferred_name or meta.get("shortName") or meta.get("longName") or stock_code,
         price=price,
         source=source,
         change=price - previous_close if previous_close is not None else None,
