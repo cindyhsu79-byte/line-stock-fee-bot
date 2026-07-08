@@ -170,6 +170,13 @@ def _format_compact_quote_reply(stock_code: str, quote_lookup) -> str:
 
     return "\n".join(
         [
+            f"{quote.stock_code} {quote.name}",
+            f"目前股價：{_format_decimal(quote.price)}元 {_format_change(quote.change)}",
+        ]
+    )
+
+    return "\n".join(
+        [
             f"代號：{quote.stock_code}",
             f"名稱：{quote.name}",
             f"目前股價：{_format_decimal(quote.price)} 元",
@@ -307,6 +314,14 @@ def _format_discount_label(discount: float | Decimal) -> str:
 
 def _format_decimal(value: Decimal) -> str:
     return f"{value.normalize():f}"
+
+
+def _format_change(value: Decimal | None) -> str:
+    if value is None:
+        return "+0"
+    if value > 0:
+        return f"+{_format_decimal(value)}"
+    return _format_decimal(value)
 
 
 def _looks_like_shares(candidate: Decimal, market_price: Decimal) -> bool:
