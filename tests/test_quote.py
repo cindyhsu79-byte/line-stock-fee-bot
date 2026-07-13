@@ -2,7 +2,7 @@ import json
 import unittest
 from decimal import Decimal
 
-from stock_fee_bot.quote import StockQuoteError, fetch_stock_quote
+from stock_fee_bot.quote import StockQuoteError, fetch_stock_quote, search_stock_matches
 
 
 class QuoteLookupTest(unittest.TestCase):
@@ -20,6 +20,7 @@ class QuoteLookupTest(unittest.TestCase):
         self.assertEqual(quote.stock_code, "2330")
         self.assertEqual(quote.name, "台積電")
         self.assertEqual(quote.price, Decimal("2445"))
+        self.assertEqual(quote.change_percent, Decimal("0.20"))
         self.assertEqual(quote.source, "Yahoo TW")
 
     def test_uses_yahoo_two_for_otc_stock(self):
@@ -71,6 +72,77 @@ class QuoteLookupTest(unittest.TestCase):
     def test_rejects_invalid_stock_code(self):
         with self.assertRaises(StockQuoteError):
             fetch_stock_quote("台積電")
+
+    def test_searches_stock_by_partial_name(self):
+        responses = [
+            [
+                {
+                    "公司代號": "2330",
+                    "公司簡稱": "台積電",
+                    "公司名稱": "台灣積體電路製造股份有限公司",
+                },
+                {
+                    "公司代號": "6770",
+                    "公司簡稱": "力積電",
+                    "公司名稱": "力晶積成電子製造股份有限公司",
+                },
+            ],
+            [],
+        ]
+
+        def fake_urlopen(request, timeout):
+            return FakeResponse(responses.pop(0))
+
+        matches = search_stock_matches("台積", urlopen=fake_urlopen)
+
+        self.assertEqual(len(matches), 1)
+        self.assertEqual(matches[0].stock_code, "2330")
+        self.assertEqual(matches[0].name, "台積電")
+
+    def test_search_normalizes_tai_character(self):
+        responses = [
+            [
+                {
+                    "公司代號": "2330",
+                    "公司簡稱": "臺積電",
+                    "公司名稱": "臺灣積體電路製造股份有限公司",
+                }
+            ],
+            [],
+        ]
+
+        def fake_urlopen(request, timeout):
+            return FakeResponse(responses.pop(0))
+
+        matches = search_stock_matches("台積", urlopen=fake_urlopen)
+
+        self.assertEqual(len(matches), 1)
+        self.assertEqual(matches[0].stock_code, "2330")
+        self.assertEqual(matches[0].name, "臺積電")
+
+    def test_search_returns_multiple_close_matches(self):
+        responses = [
+            [
+                {
+                    "公司代號": "2330",
+                    "公司簡稱": "台積電",
+                    "公司名稱": "台灣積體電路製造股份有限公司",
+                },
+                {
+                    "公司代號": "6770",
+                    "公司簡稱": "力積電",
+                    "公司名稱": "力晶積成電子製造股份有限公司",
+                },
+            ],
+            [],
+        ]
+
+        def fake_urlopen(request, timeout):
+            return FakeResponse(responses.pop(0))
+
+        matches = search_stock_matches("積電", urlopen=fake_urlopen)
+
+        self.assertEqual([match.stock_code for match in matches], ["2330", "6770"])
 
 
 class FakeResponse:
