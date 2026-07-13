@@ -2,7 +2,13 @@ import re
 from dataclasses import dataclass
 from decimal import Decimal, ROUND_HALF_UP
 
-from stock_fee_bot.quote import StockQuote, StockQuoteError, fetch_stock_quote
+from stock_fee_bot.quote import (
+    StockQuote,
+    StockQuoteError,
+    StockSearchMatch,
+    fetch_stock_quote,
+    search_stock_matches,
+)
 
 
 FEE_RATE = Decimal("0.001425")
@@ -11,6 +17,7 @@ MINIMUM_FEE = 20
 SELL_TAX_RATE = Decimal("0.003")
 PRICE_MATCH_TOLERANCE = Decimal("0.20")
 ACCEPTED_MESSAGE_RE = re.compile(r"^\s*\d{4}(?:[\s,]+\d+(?:\.\d+)?){0,2}\s*$")
+NAME_QUERY_RE = re.compile(r"^\s*[\u4e00-\u9fffA-Za-z0-9\-]{2,20}\s*$")
 
 
 class InvalidMessageError(ValueError):
@@ -19,7 +26,8 @@ class InvalidMessageError(ValueError):
 
 @dataclass(frozen=True)
 class ParsedInput:
-    stock_code: str
+    stock_code: str | None = None
+    stock_query: str | None = None
     price: Decimal | None = None
     shares: int | None = None
 
@@ -38,8 +46,11 @@ class TradeCost:
 
 
 def parse_message(text: str) -> ParsedInput:
+    name_query = _parse_name_query(text)
     if not ACCEPTED_MESSAGE_RE.fullmatch(text):
-        raise InvalidMessageError("請只輸入數字：代號、代號 數字，或代號 股價 股數")
+        if name_query is not None:
+            return ParsedInput(stock_query=name_query)
+        raise InvalidMessageError("請只輸入：代號、股票名稱，或代號 股價 股數")
 
     numbers = re.findall(r"\d+(?:\.\d+)?", text.replace(",", " "))
     stock_code = numbers[0]
@@ -63,8 +74,22 @@ def parse_message(text: str) -> ParsedInput:
     return ParsedInput(stock_code=stock_code, price=price, shares=int(shares_decimal))
 
 
-def should_ignore_text(text: str) -> bool:
-    return not ACCEPTED_MESSAGE_RE.fullmatch(text)
+def should_ignore_text(text: str, stock_search=search_stock_matches) -> bool:
+    return should_ignore_text_with_search(text, stock_search=stock_search)
+
+
+def should_ignore_text_with_search(text: str, stock_search=search_stock_matches) -> bool:
+    if ACCEPTED_MESSAGE_RE.fullmatch(text):
+        return False
+
+    name_query = _parse_name_query(text)
+    if name_query is None:
+        return True
+
+    try:
+        return len(stock_search(name_query)) == 0
+    except StockQuoteError:
+        return True
 
 
 def calculate_trade_cost(price: float | Decimal, shares: int) -> TradeCost:
@@ -106,7 +131,22 @@ def suggest_minimum_shares(price: float | Decimal) -> int:
     return shares
 
 
-def format_reply(parsed: ParsedInput, quote_lookup=fetch_stock_quote) -> str:
+def format_reply(
+    parsed: ParsedInput,
+    quote_lookup=fetch_stock_quote,
+    stock_search=search_stock_matches,
+) -> str:
+    if parsed.stock_query is not None:
+        matches = stock_search(parsed.stock_query)
+        if not matches:
+            return "\n".join([parsed.stock_query, "查不到股票名稱"])
+        if len(matches) > 1:
+            return _format_match_list(matches)
+        parsed = ParsedInput(stock_code=matches[0].stock_code)
+
+    if parsed.stock_code is None:
+        raise InvalidMessageError("請輸入股票代號或股票名稱")
+
     if parsed.price is not None and parsed.shares is not None:
         quote = _lookup_optional_quote(parsed.stock_code, quote_lookup)
         quote = StockQuote(
@@ -138,6 +178,7 @@ def format_reply(parsed: ParsedInput, quote_lookup=fetch_stock_quote) -> str:
             name=quote.name,
             price=parsed.price,
             source="User",
+            change_percent=quote.change_percent,
         )
         return format_suggestion_reply(suggested_quote, suggested_shares)
 
@@ -151,26 +192,39 @@ def format_quote_reply(quote: StockQuote) -> str:
     return "\n".join(
         [
             f"{quote.stock_code} {quote.name}",
-            f"現價：{_format_price(quote.price)}元",
+            _format_price_line(quote.price, quote.change_percent),
         ]
     )
 
 
 def format_trade_reply(quote: StockQuote, shares: int) -> str:
     cost = calculate_trade_cost(quote.price, shares)
-    return _format_trade_lines(quote.stock_code, quote.name, cost, f"股數：{cost.shares:,}股")
+    return _format_trade_lines(
+        quote.stock_code,
+        quote.name,
+        cost,
+        f"股數：{cost.shares:,}股",
+        quote.change_percent,
+    )
 
 
 def format_suggestion_reply(quote: StockQuote, shares: int) -> str:
     cost = calculate_trade_cost(quote.price, shares)
-    return _format_trade_lines(quote.stock_code, quote.name, cost, f"建議股數：{cost.shares:,}股")
+    return _format_trade_lines(
+        quote.stock_code,
+        quote.name,
+        cost,
+        f"建議股數：{cost.shares:,}股",
+        quote.change_percent,
+    )
 
 
 def format_help() -> str:
     return "\n".join(
         [
-            "請輸入：代號、代號 數字，或代號 股價 股數",
+            "請輸入：代號、股票名稱，或代號 股價 股數",
             "查現價：2330",
+            "查名稱：台積",
             "自動判斷股價/股數：2330 100",
             "直接試算：2330 2440 1000",
             "手續費折扣固定為 1.8 折。",
@@ -178,11 +232,17 @@ def format_help() -> str:
     )
 
 
-def _format_trade_lines(stock_code: str, name: str, cost: TradeCost, share_line: str) -> str:
+def _format_trade_lines(
+    stock_code: str,
+    name: str,
+    cost: TradeCost,
+    share_line: str,
+    change_percent: Decimal | None,
+) -> str:
     return "\n".join(
         [
             f"{stock_code} {name}",
-            f"現價：{_format_price(cost.price)}元",
+            _format_price_line(cost.price, change_percent),
             share_line,
             f"成交金額：{cost.trade_amount:,}元",
             f"買進成本：{cost.buy_cost:,}元",
@@ -194,6 +254,21 @@ def _format_trade_lines(stock_code: str, name: str, cost: TradeCost, share_line:
             f"買賣合計成本：{cost.total_cost:,}元",
         ]
     )
+
+
+def _parse_name_query(text: str) -> str | None:
+    stripped = text.strip()
+    if not NAME_QUERY_RE.fullmatch(stripped):
+        return None
+    if not re.search(r"[\u4e00-\u9fff]", stripped):
+        return None
+    return stripped
+
+
+def _format_match_list(matches: list[StockSearchMatch]) -> str:
+    lines = ["找到多個股票，請輸入代號："]
+    lines.extend(f"{match.stock_code} {match.name}" for match in matches[:5])
+    return "\n".join(lines)
 
 
 def _lookup_optional_quote(stock_code: str, quote_lookup) -> StockQuote | None:
@@ -215,6 +290,15 @@ def _round_ntd(amount: Decimal) -> Decimal:
 def _format_price(value: Decimal) -> str:
     normalized = value.normalize()
     return f"{normalized:f}"
+
+
+def _format_price_line(price: Decimal, change_percent: Decimal | None) -> str:
+    line = f"現價：{_format_price(price)}元"
+    if change_percent is None:
+        return line
+
+    sign = "+" if change_percent >= 0 else ""
+    return f"{line} {sign}{_format_price(change_percent)}%"
 
 
 def _looks_like_market_price(candidate: Decimal, market_price: Decimal) -> bool:
