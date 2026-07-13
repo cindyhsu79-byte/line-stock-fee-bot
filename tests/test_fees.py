@@ -9,7 +9,7 @@ from stock_fee_bot.fees import (
     parse_message,
     should_ignore_text,
 )
-from stock_fee_bot.quote import StockQuote, StockQuoteError
+from stock_fee_bot.quote import StockQuote, StockQuoteError, StockSearchMatch
 
 
 def quote_not_available(stock_code):
@@ -46,11 +46,22 @@ class MessageParsingTest(unittest.TestCase):
         with self.assertRaises(InvalidMessageError):
             parse_message("hello")
 
+    def test_parses_stock_name_query(self):
+        parsed = parse_message("台積")
+
+        self.assertIsNone(parsed.stock_code)
+        self.assertEqual(parsed.stock_query, "台積")
+        self.assertIsNone(parsed.price)
+        self.assertIsNone(parsed.shares)
+
 
 class ChatIgnoreTest(unittest.TestCase):
     def test_ignores_text_mixed_with_numbers(self):
+        def no_matches(query):
+            return []
+
         self.assertTrue(should_ignore_text("hello"))
-        self.assertTrue(should_ignore_text("真厲害"))
+        self.assertTrue(should_ignore_text("真厲害", stock_search=no_matches))
         self.assertTrue(should_ignore_text("請查 2330"))
         self.assertTrue(should_ignore_text("2330 股"))
         self.assertTrue(should_ignore_text("2330 abc"))
@@ -58,6 +69,12 @@ class ChatIgnoreTest(unittest.TestCase):
         self.assertFalse(should_ignore_text("2330 100"))
         self.assertFalse(should_ignore_text("2330 2440 1000"))
         self.assertFalse(should_ignore_text("2330,1000"))
+
+    def test_accepts_stock_name_only_when_it_matches_a_stock(self):
+        def one_match(query):
+            return [StockSearchMatch(stock_code="2330", name="台積電", source="TWSE")]
+
+        self.assertFalse(should_ignore_text("台積", stock_search=one_match))
 
 
 class FeeCalculationTest(unittest.TestCase):
@@ -87,13 +104,56 @@ class ReplyFormattingTest(unittest.TestCase):
     def test_formats_quote_reply_with_current_price_only(self):
         def fake_lookup(stock_code):
             self.assertEqual(stock_code, "2330")
-            return StockQuote(stock_code="2330", name="台積電", price=Decimal("2440"), source="Yahoo TW")
+            return StockQuote(
+                stock_code="2330",
+                name="台積電",
+                price=Decimal("2440"),
+                source="Yahoo TW",
+                change_percent=Decimal("1.04"),
+            )
 
         reply = format_reply(parse_message("2330"), quote_lookup=fake_lookup)
 
-        self.assertEqual(reply, "2330 台積電\n現價：2440元")
+        self.assertEqual(reply, "2330 台積電\n現價：2440元 +1.04%")
         self.assertNotIn("Yahoo", reply)
         self.assertNotIn("---", reply)
+
+    def test_formats_quote_reply_from_partial_stock_name(self):
+        def fake_search(query):
+            self.assertEqual(query, "台積")
+            return [StockSearchMatch(stock_code="2330", name="台積電", source="TWSE")]
+
+        def fake_lookup(stock_code):
+            self.assertEqual(stock_code, "2330")
+            return StockQuote(
+                stock_code="2330",
+                name="台積電",
+                price=Decimal("2440"),
+                source="Yahoo TW",
+                change_percent=Decimal("1.04"),
+            )
+
+        reply = format_reply(
+            parse_message("台積"),
+            quote_lookup=fake_lookup,
+            stock_search=fake_search,
+        )
+
+        self.assertEqual(reply, "2330 台積電\n現價：2440元 +1.04%")
+
+    def test_formats_multiple_name_matches(self):
+        def fake_search(query):
+            return [
+                StockSearchMatch(stock_code="2330", name="台積電", source="TWSE"),
+                StockSearchMatch(stock_code="6770", name="力積電", source="TWSE"),
+            ]
+
+        reply = format_reply(parse_message("積電"), stock_search=fake_search)
+
+        self.assertEqual(
+            reply,
+            "找到多個股票，請輸入代號：\n2330 台積電\n6770 力積電",
+        )
 
     def test_treats_second_number_as_shares_when_far_from_market_price(self):
         def fake_lookup(stock_code):
