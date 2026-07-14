@@ -18,6 +18,7 @@ class StockQuote:
     price: Decimal
     source: str
     change_percent: Decimal | None = None
+    quote_type: str = "EQUITY"
 
 
 @dataclass(frozen=True)
@@ -38,8 +39,30 @@ class _MarketResult:
 
 _URL_TIMEOUT_SECONDS = 10
 _SSL_CONTEXT = ssl._create_unverified_context()
+SECURITY_CODE_RE = re.compile(r"^\d{4,6}[A-Z]?$")
+_INDEX_ALIASES = {
+    "加權": ("^TWII", "加權指數"),
+    "加權指數": ("^TWII", "加權指數"),
+    "大盤": ("^TWII", "加權指數"),
+    "twii": ("^TWII", "加權指數"),
+    "^twii": ("^TWII", "加權指數"),
+}
 _STOCK_LIST_CACHE: tuple[StockSearchMatch, ...] | None = None
 _STOCK_LIST_SOURCES = (
+    (
+        "TWSE Daily",
+        "https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL",
+        "Code",
+        "Name",
+        "Name",
+    ),
+    (
+        "TPEx Daily",
+        "https://www.tpex.org.tw/openapi/v1/tpex_mainboard_quotes",
+        "SecuritiesCompanyCode",
+        "CompanyName",
+        "CompanyName",
+    ),
     (
         "TWSE",
         "https://openapi.twse.com.tw/v1/opendata/t187ap03_L",
@@ -58,22 +81,23 @@ _STOCK_LIST_SOURCES = (
 
 
 def fetch_stock_quote(stock_code: str, urlopen=urllib.request.urlopen) -> StockQuote:
-    normalized_code = stock_code.strip()
-    if not normalized_code.isdigit() or len(normalized_code) != 4:
-        raise StockQuoteError("股票代號必須是 4 碼")
+    normalized_code = stock_code.strip().upper()
+    if not SECURITY_CODE_RE.fullmatch(normalized_code):
+        raise StockQuoteError("股票或 ETF 代號格式不正確")
 
     preferred_name: str | None = None
-    for source, exchange_code in (
-        ("TWSE", f"tse_{normalized_code}.tw"),
-        ("TPEx", f"otc_{normalized_code}.tw"),
-    ):
-        market = _fetch_market_quote(normalized_code, exchange_code, source, urlopen)
-        if market is None:
-            continue
+    if normalized_code.isdigit() and len(normalized_code) == 4:
+        for source, exchange_code in (
+            ("TWSE", f"tse_{normalized_code}.tw"),
+            ("TPEx", f"otc_{normalized_code}.tw"),
+        ):
+            market = _fetch_market_quote(normalized_code, exchange_code, source, urlopen)
+            if market is None:
+                continue
 
-        if preferred_name is None or market.name != market.stock_code:
-            preferred_name = market.name
-        break
+            if preferred_name is None or market.name != market.stock_code:
+                preferred_name = market.name
+            break
 
     for source, symbol in (
         ("Yahoo TW", f"{normalized_code}.TW"),
@@ -84,6 +108,23 @@ def fetch_stock_quote(stock_code: str, urlopen=urllib.request.urlopen) -> StockQ
             return quote
 
     raise StockQuoteError(f"查不到 {normalized_code} 的現價")
+
+
+def fetch_index_quote(query: str, urlopen=urllib.request.urlopen) -> StockQuote:
+    normalized_query = _normalize_name(query)
+    symbol_and_name = _INDEX_ALIASES.get(normalized_query)
+    if symbol_and_name is None:
+        raise StockQuoteError("查不到指數")
+
+    symbol, name = symbol_and_name
+    quote = _fetch_yahoo_quote("", symbol, "Yahoo TW", name, urlopen)
+    if quote is None:
+        raise StockQuoteError(f"查不到 {name} 的現價")
+    return quote
+
+
+def is_index_query(query: str) -> bool:
+    return _normalize_name(query) in _INDEX_ALIASES
 
 
 def search_stock_matches(query: str, urlopen=urllib.request.urlopen) -> list[StockSearchMatch]:
@@ -155,8 +196,9 @@ def _fetch_yahoo_quote(
     preferred_name: str | None,
     urlopen,
 ) -> StockQuote | None:
+    encoded_symbol = urllib.parse.quote(symbol, safe=".")
     request = urllib.request.Request(
-        f"https://tw.stock.yahoo.com/quote/{symbol}",
+        f"https://tw.stock.yahoo.com/quote/{encoded_symbol}",
         headers={
             "User-Agent": "Mozilla/5.0",
             "Accept-Language": "zh-TW,zh;q=0.9",
@@ -185,6 +227,7 @@ def _fetch_yahoo_quote(
     if previous_close is None:
         previous_close = _parse_json_decimal_field(quote_context, "chartPreviousClose")
     change_percent = _calculate_change_percent(price, previous_close)
+    quote_type = _parse_json_string_field(quote_context, "quoteType") or "EQUITY"
 
     name = preferred_name
     name_match = re.search(r'"name":"(?P<name>[^"]+)"', quote_context)
@@ -197,6 +240,7 @@ def _fetch_yahoo_quote(
         price=price,
         source=source,
         change_percent=change_percent,
+        quote_type=quote_type,
     )
 
 
@@ -225,7 +269,7 @@ def _load_stock_list(urlopen) -> tuple[StockSearchMatch, ...]:
             stock_code = str(row.get(code_key, "")).strip()
             name = str(row.get(name_key, "")).strip()
             full_name = str(row.get(full_name_key, "")).strip()
-            if stock_code and name and stock_code.isdigit() and len(stock_code) == 4:
+            if stock_code and name and SECURITY_CODE_RE.fullmatch(stock_code):
                 matches.append(
                     StockSearchMatch(
                         stock_code=stock_code,
@@ -272,6 +316,13 @@ def _parse_json_decimal_field(text: str, field_name: str) -> Decimal | None:
     if match is None:
         return None
     return _parse_price(match.group("value"))
+
+
+def _parse_json_string_field(text: str, field_name: str) -> str | None:
+    match = re.search(rf'"{re.escape(field_name)}":"(?P<value>[^"]+)"', text)
+    if match is None:
+        return None
+    return _decode_json_string(match.group("value"))
 
 
 def _calculate_change_percent(price: Decimal, previous_close: Decimal | None) -> Decimal | None:
