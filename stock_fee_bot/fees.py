@@ -6,7 +6,9 @@ from stock_fee_bot.quote import (
     StockQuote,
     StockQuoteError,
     StockSearchMatch,
+    fetch_index_quote,
     fetch_stock_quote,
+    is_index_query,
     search_stock_matches,
 )
 
@@ -16,8 +18,12 @@ DISCOUNT_RATE = Decimal("0.18")
 MINIMUM_FEE = 20
 SELL_TAX_RATE = Decimal("0.003")
 PRICE_MATCH_TOLERANCE = Decimal("0.20")
-ACCEPTED_MESSAGE_RE = re.compile(r"^\s*\d{4}(?:[\s,]+\d+(?:\.\d+)?){0,2}\s*$")
-NAME_QUERY_RE = re.compile(r"^\s*[\u4e00-\u9fffA-Za-z0-9\-]{2,20}\s*$")
+SECURITY_CODE_PATTERN = r"\d{4,6}[A-Za-z]?"
+NUMBER_PATTERN = r"\d+(?:\.\d+)?"
+ACCEPTED_MESSAGE_RE = re.compile(
+    rf"^\s*{SECURITY_CODE_PATTERN}(?:[\s,]+{NUMBER_PATTERN}){{0,2}}\s*$"
+)
+NAME_QUERY_RE = re.compile(r"^\s*[\u4e00-\u9fffA-Za-z0-9\-\^]{2,20}\s*$")
 
 
 class InvalidMessageError(ValueError):
@@ -52,22 +58,22 @@ def parse_message(text: str) -> ParsedInput:
             return ParsedInput(stock_query=name_query)
         raise InvalidMessageError("請只輸入：代號、股票名稱，或代號 股價 股數")
 
-    numbers = re.findall(r"\d+(?:\.\d+)?", text.replace(",", " "))
-    stock_code = numbers[0]
-    if not stock_code.isdigit() or len(stock_code) != 4:
-        raise InvalidMessageError("股票代號必須是 4 碼")
+    parts = re.split(r"[\s,]+", text.strip())
+    stock_code = parts[0].upper()
+    if not re.fullmatch(SECURITY_CODE_PATTERN, stock_code):
+        raise InvalidMessageError("股票或 ETF 代號格式不正確")
 
-    if len(numbers) == 1:
+    if len(parts) == 1:
         return ParsedInput(stock_code=stock_code)
 
-    price = Decimal(numbers[1])
+    price = Decimal(parts[1])
     if price <= 0:
         raise InvalidMessageError("股價或股數必須大於 0")
 
-    if len(numbers) == 2:
+    if len(parts) == 2:
         return ParsedInput(stock_code=stock_code, price=price)
 
-    shares_decimal = Decimal(numbers[2])
+    shares_decimal = Decimal(parts[2])
     if shares_decimal <= 0 or shares_decimal != shares_decimal.to_integral_value():
         raise InvalidMessageError("股數必須是正整數")
 
@@ -85,6 +91,8 @@ def should_ignore_text_with_search(text: str, stock_search=search_stock_matches)
     name_query = _parse_name_query(text)
     if name_query is None:
         return True
+    if is_index_query(name_query):
+        return False
 
     try:
         return len(stock_search(name_query)) == 0
@@ -135,8 +143,15 @@ def format_reply(
     parsed: ParsedInput,
     quote_lookup=fetch_stock_quote,
     stock_search=search_stock_matches,
+    index_lookup=fetch_index_quote,
 ) -> str:
     if parsed.stock_query is not None:
+        if is_index_query(parsed.stock_query):
+            try:
+                return format_quote_reply(index_lookup(parsed.stock_query))
+            except StockQuoteError:
+                return "\n".join([parsed.stock_query, "查不到指數"])
+
         matches = stock_search(parsed.stock_query)
         if not matches:
             return "\n".join([parsed.stock_query, "查不到股票名稱"])
@@ -149,6 +164,8 @@ def format_reply(
 
     if parsed.price is not None and parsed.shares is not None:
         quote = _lookup_optional_quote(parsed.stock_code, quote_lookup)
+        if _is_etf_quote(quote):
+            return _format_etf_quote_only(quote)
         quote = StockQuote(
             stock_code=parsed.stock_code,
             name=quote.name if quote is not None else parsed.stock_code,
@@ -167,6 +184,9 @@ def format_reply(
                 "請確認股票代號，或稍後再試。",
             ]
         )
+
+    if parsed.price is not None and quote.quote_type == "ETF":
+        return _format_etf_quote_only(quote)
 
     if parsed.price is None:
         return format_quote_reply(quote)
@@ -189,9 +209,10 @@ def format_reply(
 
 
 def format_quote_reply(quote: StockQuote) -> str:
+    title = f"{quote.stock_code} {quote.name}" if quote.stock_code else quote.name
     return "\n".join(
         [
-            f"{quote.stock_code} {quote.name}",
+            title,
             _format_price_line(quote.price, quote.change_percent),
         ]
     )
@@ -225,6 +246,8 @@ def format_help() -> str:
             "請輸入：代號、股票名稱，或代號 股價 股數",
             "查現價：2330",
             "查名稱：台積",
+            "查 ETF：00878、元大台灣50",
+            "查大盤：加權、TWII",
             "自動判斷股價/股數：2330 100",
             "直接試算：2330 2440 1000",
             "手續費折扣固定為 1.8 折。",
@@ -258,6 +281,8 @@ def _format_trade_lines(
 
 def _parse_name_query(text: str) -> str | None:
     stripped = text.strip()
+    if is_index_query(stripped):
+        return stripped
     if not NAME_QUERY_RE.fullmatch(stripped):
         return None
     if not re.search(r"[\u4e00-\u9fff]", stripped):
@@ -269,6 +294,14 @@ def _format_match_list(matches: list[StockSearchMatch]) -> str:
     lines = ["找到多個股票，請輸入代號："]
     lines.extend(f"{match.stock_code} {match.name}" for match in matches[:5])
     return "\n".join(lines)
+
+
+def _format_etf_quote_only(quote: StockQuote) -> str:
+    return f"{format_quote_reply(quote)}\nETF 目前只支援查價。"
+
+
+def _is_etf_quote(quote: StockQuote | None) -> bool:
+    return quote is not None and quote.quote_type == "ETF"
 
 
 def _lookup_optional_quote(stock_code: str, quote_lookup) -> StockQuote | None:
