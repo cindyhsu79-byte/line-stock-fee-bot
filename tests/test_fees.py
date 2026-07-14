@@ -54,6 +54,19 @@ class MessageParsingTest(unittest.TestCase):
         self.assertIsNone(parsed.price)
         self.assertIsNone(parsed.shares)
 
+    def test_parses_etf_code_query(self):
+        parsed = parse_message("00878")
+
+        self.assertEqual(parsed.stock_code, "00878")
+        self.assertIsNone(parsed.price)
+        self.assertIsNone(parsed.shares)
+
+    def test_parses_weighted_index_alias(self):
+        parsed = parse_message("TWII")
+
+        self.assertIsNone(parsed.stock_code)
+        self.assertEqual(parsed.stock_query, "TWII")
+
 
 class ChatIgnoreTest(unittest.TestCase):
     def test_ignores_text_mixed_with_numbers(self):
@@ -66,6 +79,8 @@ class ChatIgnoreTest(unittest.TestCase):
         self.assertTrue(should_ignore_text("2330 股"))
         self.assertTrue(should_ignore_text("2330 abc"))
         self.assertFalse(should_ignore_text("2330"))
+        self.assertFalse(should_ignore_text("00878"))
+        self.assertFalse(should_ignore_text("TWII"))
         self.assertFalse(should_ignore_text("2330 100"))
         self.assertFalse(should_ignore_text("2330 2440 1000"))
         self.assertFalse(should_ignore_text("2330,1000"))
@@ -115,6 +130,57 @@ class ReplyFormattingTest(unittest.TestCase):
         reply = format_reply(parse_message("2330"), quote_lookup=fake_lookup)
 
         self.assertEqual(reply, "2330 台積電\n現價：2440元 +1.04%")
+
+    def test_formats_etf_quote_reply(self):
+        def fake_lookup(stock_code):
+            self.assertEqual(stock_code, "00878")
+            return StockQuote(
+                stock_code="00878",
+                name="國泰永續高股息",
+                price=Decimal("32.27"),
+                source="Yahoo TW",
+                change_percent=Decimal("-2.60"),
+                quote_type="ETF",
+            )
+
+        reply = format_reply(parse_message("00878"), quote_lookup=fake_lookup)
+
+        self.assertEqual(reply, "00878 國泰永續高股息\n現價：32.27元 -2.6%")
+
+    def test_formats_weighted_index_reply(self):
+        def fake_index_lookup(query):
+            self.assertEqual(query, "加權")
+            return StockQuote(
+                stock_code="",
+                name="加權指數",
+                price=Decimal("44014.56"),
+                source="Yahoo TW",
+                change_percent=Decimal("-3.01"),
+                quote_type="INDEX",
+            )
+
+        reply = format_reply(parse_message("加權"), index_lookup=fake_index_lookup)
+
+        self.assertEqual(reply, "加權指數\n現價：44014.56元 -3.01%")
+
+    def test_etf_does_not_run_trade_calculation(self):
+        def fake_lookup(stock_code):
+            self.assertEqual(stock_code, "00878")
+            return StockQuote(
+                stock_code="00878",
+                name="國泰永續高股息",
+                price=Decimal("32.27"),
+                source="Yahoo TW",
+                change_percent=Decimal("-2.60"),
+                quote_type="ETF",
+            )
+
+        reply = format_reply(parse_message("00878 100"), quote_lookup=fake_lookup)
+
+        self.assertEqual(
+            reply,
+            "00878 國泰永續高股息\n現價：32.27元 -2.6%\nETF 目前只支援查價。",
+        )
         self.assertNotIn("Yahoo", reply)
         self.assertNotIn("---", reply)
 
