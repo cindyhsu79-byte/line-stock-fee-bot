@@ -1,0 +1,23 @@
+name: Keep Render Service Awake
+
+on:
+  schedule:
+    # Taiwan time 08:50.
+    - cron: "50 0 * * *"
+    # Taiwan time 09:20, 09:50, ..., 13:20, 13:50.
+    - cron: "20,50 1-5 * * *"
+    # Taiwan time 14:00.
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+
+    steps:
+      - name: Ping Render health check
+        run: |
+          response="$(curl --fail --silent --show-error --max-time 30 https://line-stock-fee-bot.onrender.com/health)"
+          echo "$response"
+          echo "$response" | grep -q '"ok"[[:space:]]*:[[:space:]]*true'
