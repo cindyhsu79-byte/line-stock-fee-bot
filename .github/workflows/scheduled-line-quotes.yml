@@ -1,3 +1,24 @@
+name: Scheduled LINE Quotes
+
+on:
+  schedule:
+    # Weekdays, Taiwan time 08:50.
+    - cron: "50 0 * * 1-5"
+    # Weekdays, Taiwan time 13:35.
+    - cron: "35 5 * * 1-5"
+  workflow_dispatch:
+
+jobs:
+  broadcast:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+
+    steps:
+      - name: Send scheduled LINE quotes
+        run: |
+          curl --fail --silent --show-error --max-time 60 \
+            -H "X-Schedule-Token: ${{ secrets.SCHEDULE_TOKEN }}" \
+            https://line-stock-fee-bot.onrender.com/scheduled-quotes
 name: Keep Render Service Awake
 
 on:
