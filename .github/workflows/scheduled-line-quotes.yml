@@ -5,6 +5,9 @@ on:
     # Daily, Taiwan time 08:50.
     - cron: "50 8 * * *"
       timezone: "Asia/Taipei"
+    # Daily, Taiwan time 13:35.
+    - cron: "35 13 * * *"
+      timezone: "Asia/Taipei"
 
 jobs:
   broadcast:
