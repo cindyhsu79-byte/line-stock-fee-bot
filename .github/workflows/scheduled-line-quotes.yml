@@ -2,8 +2,9 @@ name: Daily LINE Quotes
 
 on:
   schedule:
-    # Daily, Taiwan time 08:50 (UTC 00:50).
-    - cron: "50 0 * * *"
+    # Daily, Taiwan time 08:50.
+    - cron: "50 8 * * *"
+      timezone: "Asia/Taipei"
 
 jobs:
   broadcast:
