@@ -1,12 +1,9 @@
-name: Scheduled LINE Quotes
+name: Daily LINE Quotes
 
 on:
   schedule:
-    # Weekdays, Taiwan time 08:50.
-    - cron: "50 0 * * 1-5"
-    # Weekdays, Taiwan time 13:35.
-    - cron: "35 5 * * 1-5"
-  workflow_dispatch:
+    # Daily, Taiwan time 08:50 (UTC 00:50).
+    - cron: "50 0 * * *"
 
 jobs:
   broadcast:
@@ -14,7 +11,7 @@ jobs:
     timeout-minutes: 5
 
     steps:
-      - name: Send scheduled LINE quotes
+      - name: Send daily LINE quotes
         run: |
           curl --fail --silent --show-error --max-time 180 \
             -H "X-Schedule-Token: ${{ secrets.SCHEDULE_TOKEN }}" \
