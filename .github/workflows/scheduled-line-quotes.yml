@@ -1,13 +1,7 @@
-name: Daily LINE Quotes
+name: Manual LINE Quotes
 
 on:
-  schedule:
-    # Daily, Taiwan time 08:50.
-    - cron: "50 8 * * *"
-      timezone: "Asia/Taipei"
-    # Daily, Taiwan time 13:35.
-    - cron: "35 13 * * *"
-      timezone: "Asia/Taipei"
+  workflow_dispatch:
 
 jobs:
   broadcast:
@@ -15,7 +9,7 @@ jobs:
     timeout-minutes: 5
 
     steps:
-      - name: Send daily LINE quotes
+      - name: Send LINE quotes manually
         run: |
           curl --fail --silent --show-error --max-time 180 \
             -H "X-Schedule-Token: ${{ secrets.SCHEDULE_TOKEN }}" \
